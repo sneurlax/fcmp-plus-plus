@@ -290,6 +290,10 @@ fn test_witness_equivalence() {
   let q = Ep::random(&mut OsRng);
   let r = -(p + q);
   
+  println!("Testing Witness equivalence:");
+  println!("P+Q+R = O? {}", bool::from((p + q + r).is_identity()));
+  println!("P+Q = O? {}", bool::from((p + q).is_identity()));
+  
   // witness([P,Q,R]) represents P+Q+R = O (valid divisor).
   let witness_pqr = new_divisor::<Ep>(&[p, q, r]);
   
@@ -298,24 +302,39 @@ fn test_witness_equivalence() {
   
   match (witness_pqr, witness_pqr_neg_r) {
     (Some(w1), Some(w2)) => {
+      println!("Both witnesses created successfully");
       let witnesses_equal = w1.y_coefficients == w2.y_coefficients &&
                            w1.x_coefficients == w2.x_coefficients &&
                            w1.zero_coefficient == w2.zero_coefficient &&
                            w1.yx_coefficients == w2.yx_coefficients;
       
+      println!("Witnesses are identical: {}", witnesses_equal);
+      
+      if witnesses_equal {
+        println!("   Same witness for P+Q+R=O and P+Q=O (different math statements)");
+        println!("   This suggests the system cannot distinguish between valid/invalid divisors");
+      } else {
+        println!("System working correctly: Different witnesses for different statements");
+      }
+      
       // Different mathematical statements should produce different witnesses.
       assert!(!witnesses_equal, "Same witness for different divisor statements");
     },
     (Some(_), None) => {
-      // Expected: first succeeds, second fails since P+Q ≠ O.
+      println!("Expected behavior: Valid divisor succeeded, invalid divisor failed");
+      println!("   witness([P,Q,R]) created (P+Q+R=O)");
+      println!("   witness([P,Q,R,-R]) rejected (P+Q≠O)");
     },
     (None, Some(_)) => {
+      println!("Unexpected: Invalid divisor succeeded while valid divisor failed");
       panic!("Invalid divisor succeeded while valid divisor failed");
     },
     (None, None) => {
-      // Both failed - acceptable outcome.
+      println!("Both witnesses failed - acceptable but unusual outcome");
     }
   }
+  
+  println!("Witness equivalence concerns not confirmed");
 }
 
 #[test]
@@ -354,4 +373,56 @@ fn test_divisor_ed25519() {
   test_same_point::<EdwardsPoint>();
   test_subset_sum_to_infinity::<EdwardsPoint>();
   test_divisor::<EdwardsPoint>();
+}
+
+/// Does bypassing the sum-to-zero validation reveal that the witness 
+/// generation algorithm produces identical witnesses for mathematically 
+/// different statements?
+///
+/// This tests a hypothesis that the core witness algorithm might ignore some 
+/// input points, causing [P,Q,R] (where P+Q+R=O) and [P,Q,R,-R] (where P+Q≠O) 
+/// to produce the same witness.  If true, this would indicate the sum-to-zero 
+// check masks a deeper algorithmic bug.
+#[test]
+fn test_bypass_sum_check_reveals_bug() {
+  let p = Ep::random(&mut OsRng);
+  let q = Ep::random(&mut OsRng);
+  let r = -(p + q); // Ensures P+Q+R = O.
+  
+  // Verify our test setup: P+Q+R=O but P+Q≠O.
+  assert!(bool::from((p + q + r).is_identity()));
+  assert!(!bool::from((p + q).is_identity()));
+  
+  // Test witness generation with bypassed sum check:
+  // [P,Q,R] represents the statement P+Q+R=O (mathematically valid).
+  // [P,Q,R,-R] represents the statement P+Q+R+(-R)=P+Q=O (mathematically invalid).
+  let witness_pqr = crate::new_divisor_bypass_sum_check(&[p, q, r]);
+  let witness_pqr_neg_r = crate::new_divisor_bypass_sum_check(&[p, q, r, -r]);
+  
+  match (witness_pqr, witness_pqr_neg_r) {
+    (Some(w1), Some(w2)) => {
+      // Both witnesses were created despite one representing an invalid statement.
+      let witnesses_identical = w1.y_coefficients == w2.y_coefficients &&
+                               w1.x_coefficients == w2.x_coefficients &&
+                               w1.zero_coefficient == w2.zero_coefficient &&
+                               w1.yx_coefficients == w2.yx_coefficients;
+      
+      if witnesses_identical {
+        // CRITICAL BUG: Same witness for different mathematical statements.
+        // This would mean the algorithm doesn't properly account for all input points.
+        panic!("CRITICAL BUG: Identical witnesses for [P,Q,R] and [P,Q,R,-R] - algorithm ignores some points");
+      }
+      // Different witnesses confirm the algorithm correctly processes all input points.
+    },
+    (Some(_), None) => {
+      // Expected: valid statement succeeds, invalid statement fails even with bypass.
+      // This suggests only validation was bypassed, not core witness generation.
+    },
+    (None, Some(_)) => {
+      panic!("Unexpected: valid statement failed while invalid statement succeeded");
+    },
+    (None, None) => {
+      panic!("Both bypassed calls failed - check bypass implementation");
+    }
+  }
 }
