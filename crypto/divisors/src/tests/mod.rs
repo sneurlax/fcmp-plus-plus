@@ -282,6 +282,42 @@ fn test_i2_edge_case() {
   assert!(witness_result.is_some());
 }
 
+/// Do witnesses for [P,Q,R] and [P,Q,R,-R] produce identical output despite representing different mathematical statements?
+#[test]
+fn test_witness_equivalence() {
+  // P,Q random points; R = -(P+Q) forces P+Q+R = O.
+  let p = Ep::random(&mut OsRng);
+  let q = Ep::random(&mut OsRng);
+  let r = -(p + q);
+  
+  // witness([P,Q,R]) represents P+Q+R = O (valid divisor).
+  let witness_pqr = new_divisor::<Ep>(&[p, q, r]);
+  
+  // witness([P,Q,R,-R]) represents P+Q+R+(-R) = P+Q = O (invalid since P+Q ≠ O).
+  let witness_pqr_neg_r = new_divisor::<Ep>(&[p, q, r, -r]);
+  
+  match (witness_pqr, witness_pqr_neg_r) {
+    (Some(w1), Some(w2)) => {
+      let witnesses_equal = w1.y_coefficients == w2.y_coefficients &&
+                           w1.x_coefficients == w2.x_coefficients &&
+                           w1.zero_coefficient == w2.zero_coefficient &&
+                           w1.yx_coefficients == w2.yx_coefficients;
+      
+      // Different mathematical statements should produce different witnesses.
+      assert!(!witnesses_equal, "Same witness for different divisor statements");
+    },
+    (Some(_), None) => {
+      // Expected: first succeeds, second fails since P+Q ≠ O.
+    },
+    (None, Some(_)) => {
+      panic!("Invalid divisor succeeded while valid divisor failed");
+    },
+    (None, None) => {
+      // Both failed - acceptable outcome.
+    }
+  }
+}
+
 #[test]
 fn test_divisor_ed25519() {
   // Since we're implementing Wei25519 ourselves, check the isomorphism works as expected
