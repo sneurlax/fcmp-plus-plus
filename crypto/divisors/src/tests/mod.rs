@@ -382,7 +382,7 @@ fn test_divisor_ed25519() {
 /// This tests a hypothesis that the core witness algorithm might ignore some 
 /// input points, causing [P,Q,R] (where P+Q+R=O) and [P,Q,R,-R] (where P+Q≠O) 
 /// to produce the same witness.  If true, this would indicate the sum-to-zero 
-// check masks a deeper algorithmic bug.
+/// check masks a deeper algorithmic bug.
 #[test]
 fn test_bypass_sum_check_reveals_bug() {
   let p = Ep::random(&mut OsRng);
@@ -425,4 +425,79 @@ fn test_bypass_sum_check_reveals_bug() {
       panic!("Both bypassed calls failed - check bypass implementation");
     }
   }
+}
+
+/// Does the witness function f have the expected mathematical properties when 
+/// generated from [P,Q,R] where P+Q+R=O?
+///
+/// The witness should evaluate to zero at the input points P, Q, R, be well-
+/// defined everywhere else on the curve, but f(-R) might also equal zero, 
+/// which could indicate unexpected behavior in the witness generation.
+#[test]
+fn test_witness_evaluation_properties() {
+  let p = Ep::random(&mut OsRng);
+  let q = Ep::random(&mut OsRng);  
+  let r = -(p + q); // Ensures P+Q+R = O
+  
+  // Verify test setup.
+  assert!(bool::from((p + q + r).is_identity()));
+  
+  // Generate witness function from [P,Q,R].
+  let witness = new_divisor::<Ep>(&[p, q, r]).expect("Witness generation should succeed for valid input");
+  
+  // Extract coordinates for evaluation.
+  let (px, py) = Ep::to_xy(p).unwrap();
+  let (qx, qy) = Ep::to_xy(q).unwrap(); 
+  let (rx, ry) = Ep::to_xy(r).unwrap();
+  let (neg_rx, neg_ry) = Ep::to_xy(-r).unwrap();
+  
+  // Test 1: Witness should evaluate to zero at input points P, Q, R.
+  let fp = witness.eval(px, py);
+  let fq = witness.eval(qx, qy);
+  let fr = witness.eval(rx, ry);
+  
+  assert_eq!(fp, Field::ZERO, "f(P) should equal zero");
+  assert_eq!(fq, Field::ZERO, "f(Q) should equal zero"); 
+  assert_eq!(fr, Field::ZERO, "f(R) should equal zero");
+  
+  // Test 2: Key question - what happens when evaluating f(-R)?
+  let f_neg_r = witness.eval(neg_rx, neg_ry);
+  
+  if f_neg_r == Field::ZERO {
+    // This could indicate unexpected behavior - the witness has more zeros than expected.
+    panic!("UNEXPECTED: f(-R) = 0. The witness has an extra zero at -R, which may indicate algorithmic issues");
+  }
+  // If f(-R) ≠ 0, this is the expected behavior.
+  
+  // Test 3: Witness should be well-defined at other random points.
+  for _ in 0..10 {
+    let random_point = Ep::random(&mut OsRng);
+    if let Some((x, y)) = Ep::to_xy(random_point) {
+      let f_random = witness.eval(x, y);
+      // Just verify evaluation doesn't panic or cause errors.
+      // The value itself can be anything (zero or non-zero).
+      let _ = f_random;
+    }
+  }
+  
+  // Test 4: Verify witness doesn't evaluate to zero at a few more specific points.
+  let other_points = [
+    Ep::random(&mut OsRng),
+    Ep::random(&mut OsRng), 
+    Ep::random(&mut OsRng)
+  ];
+  
+  let mut non_zero_count = 0;
+  for point in other_points {
+    if let Some((x, y)) = Ep::to_xy(point) {
+      let f_val = witness.eval(x, y);
+      if f_val != Field::ZERO {
+        non_zero_count += 1;
+      }
+    }
+  }
+  
+  // The witness should not evaluate to zero at most random points
+  // (though it's theoretically possible for some random points to be zeros).
+  assert!(non_zero_count >= 2, "Witness should be non-zero at most random points");
 }
