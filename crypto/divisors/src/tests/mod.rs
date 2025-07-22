@@ -198,6 +198,90 @@ fn test_divisor_vesta() {
   test_divisor::<Eq>();
 }
 
+/// Does FCMP++'s additive inverse padding create witnesses equivalent to Silver Bullet's identity padding?
+#[test]
+fn test_3_vs_4_inputs() {
+  // Test if odd-length inputs (which trigger additive inverse padding) produce witnesses quivalent to Silver Bullet's identity padding approach.  
+  // If Line(C,-C) ≡ Line(C,0), then both padding methods create mathematically equivalent witnesses.
+  let a = Ep::random(&mut OsRng);
+  let b = Ep::random(&mut OsRng);
+  let c = -(a + b);  // Force sum to identity.
+  let three_points = vec![a, b, c];
+  
+  let result_3 = new_divisor::<Ep>(&three_points);
+  
+  // Verify witness passes FCMP++ verification equations.
+  if result_3.is_some() {
+    check_divisor(three_points.clone());
+    
+    // Test core equivalence: Does FCMP++'s Line(C,-C) equal Silver Bullet's Line(C,0)?
+    // If true: both padding methods produce equivalent witnesses.
+    // If false: padding methods create fundamentally different mathematical structures.
+    let line_c_neg_c = crate::line::<Ep>(c, -c);
+    let silver_bullet_line = crate::line::<Ep>(c, Ep::identity());
+    
+    let lines_equivalent = line_c_neg_c.y_coefficients   == silver_bullet_line.y_coefficients &&
+                           line_c_neg_c.x_coefficients   == silver_bullet_line.x_coefficients &&
+                           line_c_neg_c.zero_coefficient == silver_bullet_line.zero_coefficient;
+    
+    println!("Line(C,-C) ≡ Line(C,0): {}", lines_equivalent);
+  }
+  
+  // Test even-length inputs (no padding required) as control case.
+  // Even-length avoids the padding equivalence issue entirely.
+  let d = Ep::random(&mut OsRng);
+  let e = Ep::random(&mut OsRng);
+  let f = Ep::random(&mut OsRng);
+  let g = -(d + e + f);
+  let four_points = vec![d, e, f, g];
+  
+  let result_4 = new_divisor::<Ep>(&four_points);
+  
+  if result_4.is_some() {
+    check_divisor(four_points.clone());
+  }
+  
+  // Both should succeed, but they work through different mechanisms.
+  assert!(result_3.is_some(), "3 points should succeed");
+  assert!(result_4.is_some(), "4 points should succeed");
+}
+
+/// Does the i=2 case produce a vertical line instead of a tangent?
+#[test]
+fn test_i2_edge_case() {
+  // i=2: points [A, B, -(A+B)].
+  let a = Ep::random(&mut OsRng);
+  let b = Ep::random(&mut OsRng); 
+  let c = -(a + b);
+  let points = vec![a, b, c];
+  
+  let witness_result = new_divisor::<Ep>(&points);
+  
+  if let Some(_) = witness_result {
+    check_divisor(points.clone());
+    
+    // In the pairing algorithm, unpaired point C gets paired with -C.
+    let line_c_neg_c = crate::line::<Ep>(c, -c);
+    
+    // Verify this produces a vertical line (x - constant).
+    let is_vertical = line_c_neg_c.y_coefficients == vec![<Ep as DivisorCurve>::FieldElement::ZERO] &&
+                      line_c_neg_c.x_coefficients == vec![<Ep as DivisorCurve>::FieldElement::ONE] &&
+                      line_c_neg_c.yx_coefficients.is_empty();
+    
+    // Compare to tangent at C.
+    let tangent_at_c = crate::line::<Ep>(c, c);
+    let equals_tangent = line_c_neg_c.y_coefficients == tangent_at_c.y_coefficients &&
+                         line_c_neg_c.x_coefficients == tangent_at_c.x_coefficients &&
+                         line_c_neg_c.zero_coefficient == tangent_at_c.zero_coefficient;
+    
+    // Line(C, -C) should be vertical, not tangent.
+    assert!(is_vertical);
+    assert!(!equals_tangent);
+  }
+  
+  assert!(witness_result.is_some());
+}
+
 #[test]
 fn test_divisor_ed25519() {
   // Since we're implementing Wei25519 ourselves, check the isomorphism works as expected
